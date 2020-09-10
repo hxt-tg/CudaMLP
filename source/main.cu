@@ -5,14 +5,11 @@
 #include "random.cuh"
 #include "mlp.cuh"
 
-template<class MatrixClass>
-void test_Matrix() {
-    MatrixClass a = {
-            {0., 1.},
-            {2., 3.},
-            {5., 4.},
-    };
-    MatrixClass b = random_matrix<MatrixClass>(2, 5);
+void test_CUDAMatrix() {
+    CUDAMatrix a(CPUMatrix({{0., 1.},
+                            {2., 3.},
+                            {5., 4.}}));
+    CUDAMatrix b(random_matrix(2, 5));
     std::cout << a << std::endl;
     std::cout << b << std::endl;
     std::cout << a % b << std::endl;
@@ -24,14 +21,14 @@ void test_Matrix() {
     std::cout << a * 3 << std::endl;
 }
 
-template<class MatrixClass>
-void test_MLP(unsigned iter_times = 10000) {
+template <class MatrixClass=CPUMatrix>
+void test_MLP(unsigned iter_times = 100000) {
     MLP<MatrixClass> mlp({786, 256, 256, 10});
     std::cout << mlp << std::endl;
     std::vector<MatrixClass> data_x, data_y;
     for (auto i = 0; i < 100; i++) {
-        data_x.push_back(random_matrix<MatrixClass>(786, 1));
-        data_y.push_back(random_matrix<MatrixClass>(10, 1));
+        data_x.push_back(MatrixClass(random_matrix(786, 1)));
+        data_y.push_back(MatrixClass(random_matrix(10, 1)));
     }
 
     for (auto i = 0; i < iter_times; i++)

@@ -272,7 +272,7 @@ public:
         if (!r || !c) return;
         row = r;
         col = c;
-        size = r * c * sizeof(float);
+        size = row * col * sizeof(float);
         CudaCheck(cudaMalloc(&data, size));
     }
 
@@ -447,7 +447,7 @@ public:
         return (*this);
     }
 
-    MatrixOnGPU transpose() {
+    MatrixOnGPU transpose() const {
         unsigned new_row = col, new_col = row;
         MatrixOnGPU _m(new_row, new_col);
         transpose_device(_m.data, data, new_row, new_col);

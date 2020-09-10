@@ -33,9 +33,9 @@ public:
             throw std::runtime_error("There should be at least 2 layers.");
 
         for (auto i = 0; i < n_layers; i++)
-            w.push_back(random_matrix<MatrixClass>(layer_dim[i + 1], layer_dim[i]));
+            w.push_back(MatrixClass(random_matrix(layer_dim[i + 1], layer_dim[i])));
         for (auto i = 0; i < n_layers; i++)
-            t.push_back(random_matrix<MatrixClass>(layer_dim[i + 1], 1));
+            t.push_back(MatrixClass(random_matrix(layer_dim[i + 1], 1)));
     }
 
     MatrixClass feed_forward(const MatrixClass &x) const {

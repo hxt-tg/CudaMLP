@@ -251,18 +251,6 @@ public:
         return n;
     }
 
-    unsigned n_rows() const {
-        return row;
-    }
-
-    unsigned n_cols() const {
-        return col;
-    }
-
-    std::pair<unsigned, unsigned> shape() const {
-        return std::make_pair(row, col);
-    }
-
     float sum() const {
         float s = 0;
         for (auto i = 0; i < row; i++)
@@ -291,7 +279,7 @@ public:
         if (endl) std::cout << std::endl;
     }
 
-private:
+public:
     unsigned row{0};
     unsigned col{0};
     float **data{nullptr};
@@ -299,9 +287,9 @@ private:
 
 // sigmoid functions
 CPUMatrix sigmoid(const CPUMatrix &m) {
-    CPUMatrix _m(m.n_rows(), m.n_cols());
-    for (auto i = 0; i < _m.n_rows(); i++)
-        for (auto j = 0; j < _m.n_cols(); j++)
+    CPUMatrix _m(m.row, m.col);
+    for (auto i = 0; i < _m.row; i++)
+        for (auto j = 0; j < _m.col; j++)
             _m(i, j) = 1 / (1 + exp(-m(i, j)));
     return _m;
 }

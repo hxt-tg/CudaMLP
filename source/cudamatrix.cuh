@@ -7,6 +7,7 @@
 #include <random>
 #include <array>
 #include <cuda.h>
+#include <curand.h>
 
 #define BLOCK_SIZE  32
 
@@ -16,6 +17,14 @@
 inline void CudaErrorHandler(cudaError_t status, const char *file, int line, bool interrupt = true) {
     if (status == cudaSuccess) return;
     fprintf(stderr, "CUDA error %d \"%s\" at %s %d\n", status, cudaGetErrorString(status), file, line);
+    if (interrupt) exit(status);
+}
+
+#define CurandCheck(status) CurandErrorHandler((status), __FILE__, __LINE__)
+
+inline void CurandErrorHandler(curandStatus_t status, const char *file, int line, bool interrupt = true) {
+    if (status == CURAND_STATUS_SUCCESS) return;
+    fprintf(stderr, "CURAND error %d at %s %d\n", status, file, line);
     if (interrupt) exit(status);
 }
 
@@ -54,19 +63,11 @@ __global__ void element_wise_kernel(float *result, const float *a, const float *
 
 void element_wise_interface(float *result, const float *a, const float *b, unsigned row, unsigned col,
                             KernelFuncType op) {
-    size_t size = row * col * sizeof(float);
     dim3 threadsPerBlock(BLOCK_SIZE, BLOCK_SIZE);
     dim3 blocksPerGrid((row + threadsPerBlock.x - 1) / threadsPerBlock.x,
                        (col + threadsPerBlock.y - 1) / threadsPerBlock.y);
-
-    float *d_a, *d_b, *d_result;
     kernel_ptr op_func;
-    CudaCheck(cudaMalloc(&d_a, size));
-    CudaCheck(cudaMalloc(&d_b, size));
-    CudaCheck(cudaMalloc(&d_result, size));
     CudaCheck(cudaMalloc(&op_func, sizeof(kernel_ptr)));
-    CudaCheck(cudaMemcpy(d_a, a, size, cudaMemcpyHostToDevice));
-    CudaCheck(cudaMemcpy(d_b, b, size, cudaMemcpyHostToDevice));
     switch (op) {
         case KERNEL_ADD:
             CudaCheck(cudaMemcpyFromSymbol(&op_func, device_kernel_add, sizeof(kernel_ptr)));
@@ -83,14 +84,8 @@ void element_wise_interface(float *result, const float *a, const float *b, unsig
         default:
             throw std::runtime_error("Unsupported kernel operation.");
     }
-
-    element_wise_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_result, d_a, d_b, row, col, *op_func);
+    element_wise_kernel<<<blocksPerGrid, threadsPerBlock>>>(result, a, b, row, col, *op_func);
     CudaCheck(cudaDeviceSynchronize());
-
-    CudaCheck(cudaMemcpy(result, d_result, size, cudaMemcpyDeviceToHost));
-    CudaCheck(cudaFree(d_a));
-    CudaCheck(cudaFree(d_b));
-    CudaCheck(cudaFree(d_result));
 }
 
 
@@ -105,17 +100,11 @@ __global__ void scalar_kernel(float *result, const float *a, const float b, unsi
 
 void scalar_interface(float *result, const float *a, const float b, unsigned row, unsigned col,
                       KernelFuncType op) {
-    size_t size = row * col * sizeof(float);
     dim3 threadsPerBlock(BLOCK_SIZE, BLOCK_SIZE);
     dim3 blocksPerGrid((row + threadsPerBlock.x - 1) / threadsPerBlock.x,
                        (col + threadsPerBlock.y - 1) / threadsPerBlock.y);
-
-    float *d_a, *d_result;
     kernel_ptr op_func;
-    CudaCheck(cudaMalloc(&d_a, size));
-    CudaCheck(cudaMalloc(&d_result, size));
     CudaCheck(cudaMalloc(&op_func, sizeof(kernel_ptr)));
-    CudaCheck(cudaMemcpy(d_a, a, size, cudaMemcpyHostToDevice));
     switch (op) {
         case KERNEL_ADD:
             CudaCheck(cudaMemcpyFromSymbol(&op_func, device_kernel_add, sizeof(kernel_ptr)));
@@ -132,13 +121,8 @@ void scalar_interface(float *result, const float *a, const float b, unsigned row
         default:
             throw std::runtime_error("Unsupported kernel operation.");
     }
-
-    scalar_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_result, d_a, b, row, col, *op_func);
+    scalar_kernel<<<blocksPerGrid, threadsPerBlock>>>(result, a, b, row, col, *op_func);
     CudaCheck(cudaDeviceSynchronize());
-
-    CudaCheck(cudaMemcpy(result, d_result, size, cudaMemcpyDeviceToHost));
-    CudaCheck(cudaFree(d_a));
-    CudaCheck(cudaFree(d_result));
 }
 
 
@@ -160,29 +144,11 @@ __global__ void matmul_kernel(float *result, const float *a, const float *b,
 }
 
 void matmul_interface(float *result, const float *a, const float *b, unsigned row, unsigned mid, unsigned col) {
-    size_t size_a = row * mid * sizeof(float);
-    size_t size_b = mid * col * sizeof(float);
-    size_t size_result = row * col * sizeof(float);
-
     dim3 threadsPerBlock(BLOCK_SIZE, BLOCK_SIZE);
     dim3 blocksPerGrid((row + threadsPerBlock.x - 1) / threadsPerBlock.x,
                        (col + threadsPerBlock.y - 1) / threadsPerBlock.y);
-
-    float *d_a, *d_b, *d_result;
-    CudaCheck(cudaMalloc(&d_a, size_a));
-    CudaCheck(cudaMalloc(&d_b, size_b));
-    CudaCheck(cudaMalloc(&d_result, size_result));
-    CudaCheck(cudaMemcpy(d_a, a, size_a, cudaMemcpyHostToDevice));
-    CudaCheck(cudaMemcpy(d_b, b, size_b, cudaMemcpyHostToDevice));
-
-    matmul_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_result, d_a, d_b, row, mid, col);
-
+    matmul_kernel<<<blocksPerGrid, threadsPerBlock>>>(result, a, b, row, mid, col);
     CudaCheck(cudaThreadSynchronize());
-    CudaCheck(cudaMemcpy(result, d_result, size_result, cudaMemcpyDeviceToHost));
-
-    CudaCheck(cudaFree(d_a));
-    CudaCheck(cudaFree(d_b));
-    CudaCheck(cudaFree(d_result));
 }
 
 
@@ -196,23 +162,29 @@ __global__ void transpose_kernel(float *result, const float *a, unsigned row, un
 }
 
 void transpose_interface(float *result, const float *a, unsigned row, unsigned col) {
-
-    size_t size = row * col * sizeof(float);
     dim3 threadsPerBlock(BLOCK_SIZE, BLOCK_SIZE);
     dim3 blocksPerGrid((row + threadsPerBlock.x - 1) / threadsPerBlock.x,
                        (col + threadsPerBlock.y - 1) / threadsPerBlock.y);
-
-    float *d_a, *d_result;
-    CudaCheck(cudaMalloc(&d_a, size));
-    CudaCheck(cudaMalloc(&d_result, size));
-    CudaCheck(cudaMemcpy(d_a, a, size, cudaMemcpyHostToDevice));
-
-    transpose_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_result, d_a, row, col);
+    transpose_kernel<<<blocksPerGrid, threadsPerBlock>>>(result, a, row, col);
     CudaCheck(cudaDeviceSynchronize());
+}
 
-    CudaCheck(cudaMemcpy(result, d_result, size, cudaMemcpyDeviceToHost));
-    CudaCheck(cudaFree(d_a));
-    CudaCheck(cudaFree(d_result));
+
+/* ======== Matrix initialize kernels ======== */
+__global__ void initialize_kernel(float *result, const float val, unsigned row, unsigned col) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (i >= row || j >= col) return;
+    result[i * col + j] = val;
+}
+
+void initialize_interface(float *result, const float val, unsigned row, unsigned col) {
+    dim3 threadsPerBlock(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 blocksPerGrid((row + threadsPerBlock.x - 1) / threadsPerBlock.x,
+                       (col + threadsPerBlock.y - 1) / threadsPerBlock.y);
+    initialize_kernel<<<blocksPerGrid, threadsPerBlock>>>(result, val, row, col);
+    CudaCheck(cudaDeviceSynchronize());
 }
 
 class CUDAMatrix {
@@ -230,36 +202,38 @@ public:
     CUDAMatrix() = default;
 
     CUDAMatrix(const unsigned &r, const unsigned &c, const float &val = 0.0) : CUDAMatrix() {
+        if (!r || !c) return;
         row = r;
         col = c;
-        data = malloc_matrix(row, col);
-        for (auto i = 0; i < row * col; i++)
-            data[i] = val;
+        size = row * col * sizeof(float);
+        CudaCheck(cudaMalloc(&data, size));
+        initialize_interface(data, val, row, col);
     }
 
     CUDAMatrix(const CUDAMatrix &m) : CUDAMatrix(m.row, m.col) {
-        memcpy(data, m.data, row * col * sizeof(float));
+        CudaCheck(cudaMemcpy(data, m.data, size, cudaMemcpyDeviceToDevice));
     }
 
-    CUDAMatrix(const std::initializer_list<std::initializer_list<float>> &arr) : CUDAMatrix() {
-        if (arr.size() == 0 || arr.begin()->size() == 0) return;
-
-        auto arr_n_rows = arr.size(), arr_n_cols = arr.begin()->size();
-        for (auto it = arr.begin(); it != arr.end(); it++)
-            if (it->size() != arr_n_cols)
-                throw std::runtime_error("Not a matrix.");
-
-        row = arr_n_rows;
-        col = arr_n_cols;
-        data = malloc_matrix(row, col);
-        unsigned i = 0;
-        for (auto row_it = arr.begin(); row_it < arr.end(); row_it++)
-            for (auto col_it = row_it->begin(); col_it < row_it->end(); i++, col_it++)
-                data[i] = *col_it;
+    explicit CUDAMatrix(const CPUMatrix &m) : CUDAMatrix() {
+        if (!m.row || !m.col) return;
+        row = m.row;
+        col = m.col;
+        size = row * col * sizeof(float);
+        CudaCheck(cudaMalloc(&data, size));
+        for (auto i = 0; i < row; i++)
+            CudaCheck(cudaMemcpy(data + i * col, m.data[i],
+                                 col * sizeof(float), cudaMemcpyHostToDevice));
     }
 
     ~CUDAMatrix() {
         clear();
+    }
+
+    void clear() {
+        if (!size) return;
+        CudaCheck(cudaFree(data));
+        row = col = size = 0;
+        data = nullptr;
     }
 
     // Operators
@@ -270,9 +244,9 @@ public:
 
         row = m.row;
         col = m.col;
-        data = malloc_matrix(row, col);
-
-        memcpy(data, m.data, row * col * sizeof(float));
+        size = m.size;
+        CudaCheck(cudaMalloc(&data, size));
+        CudaCheck(cudaMemcpy(data, m.data, size, cudaMemcpyDeviceToDevice));
         return *this;
     }
 
@@ -399,65 +373,42 @@ public:
         return (*this);
     }
 
-    float &operator()(const unsigned &r, const unsigned &c) {
-        return this->data[r * col + c];
-    }
-
-    const float &operator()(const unsigned &r, const unsigned &c) const {
-        return this->data[r * col + c];
-    }
-
-    CUDAMatrix transpose() {
+    CUDAMatrix transpose() const {
         unsigned new_row = col, new_col = row;
         CUDAMatrix _m(new_row, new_col);
         transpose_interface(_m.data, data, new_row, new_col);
         return _m;
     }
 
-    float *raw_data() const {
-        return data;
-    }
-
-    unsigned n_rows() const {
-        return row;
-    }
-
-    unsigned n_cols() const {
-        return col;
-    }
-
-    std::pair<unsigned, unsigned> shape() const {
-        return std::make_pair(row, col);
-    }
-
     float sum() const {
+        auto d = new float[size];
+        CudaCheck(cudaMemcpy(d, data, size, cudaMemcpyDeviceToHost));
+
         float s = 0;
         for (auto i = 0; i < row * col; i++)
-            s += data[i];
+            s += d[i];
+        delete[] d;
         return s;
     }
 
-    void clear() {
-        if (!row || !col) return;
-        delete[] data;
-
-        row = col = 0;
-        data = nullptr;
-    }
-
     void print_all_numbers(bool endl = true) const {
+        auto d = new float[size];
+        CudaCheck(cudaMemcpy(d, data, size, cudaMemcpyDeviceToHost));
+
         for (auto i = 0; i < row; ++i) {
             for (auto j = 0; j < col; ++j)
                 std::cout << std::fixed << std::setprecision(4) << std::setw(10)
-                          << data[i * col + j];
+                          << d[i * col + j];
             std::cout << std::endl;
         }
         if (endl) std::cout << std::endl;
+        delete[] d;
     }
 
-private:
+public:
     unsigned row{0};
     unsigned col{0};
+    size_t size{0};
     float *data{nullptr};
 };
 
@@ -490,8 +441,8 @@ void sigmoid_interface(float *result, const float *a, unsigned row, unsigned col
 }
 
 CUDAMatrix sigmoid(const CUDAMatrix &m) {
-    CUDAMatrix _m(m.n_rows(), m.n_cols());
-    sigmoid_interface(_m.raw_data(), m.raw_data(), m.n_rows(), m.n_cols());
+    CUDAMatrix _m(m.row, m.col);
+    sigmoid_interface(_m.data, m.data, m.row, m.col);
     return _m;
 }
 
