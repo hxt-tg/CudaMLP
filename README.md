@@ -5,16 +5,16 @@ A MLP implementation on multicore processors with Cuda. For final assignment of 
 
 - Computational intensive
 - Efficient training and fitting
-- Easily portable and expandable
+- ~~Easily portable and expandable~~
 - Lightweight and friendly program interface
 
 ## TODO
 
-- [ ] CUDA or CPU parallel?
-- [ ] API design
-- [ ] Algebra calculation module
+- [x] CUDA or CPU parallel?
+- [x] API design
+- [x] Algebra calculation module
 - [ ] Data feeding module
-- [ ] MLP training module
+- [x] MLP training module
 - [ ] Unit test
 
 ## TODO (Depend on time)
