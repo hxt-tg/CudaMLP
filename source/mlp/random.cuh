@@ -1,9 +1,9 @@
 #ifndef CUDAMLP_RANDOM_CUH
 #define CUDAMLP_RANDOM_CUH
 
-#include "cpumatrix.cuh"
+#include "cpu_matrix.cuh"
 
-CPUMatrix random_matrix(unsigned row, unsigned col) {
+CPUMatrix random_normal(unsigned row, unsigned col) {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::normal_distribution<float> nd(0, 1);

@@ -1,11 +1,19 @@
 # CudaMLP
 A MLP implementation on multicore processors with Cuda. For final assignment of multi-core processors course.
 
+## Test dataset
+
+The classic IRIS dataset is used to test and verify the MLP algorithm.
+
+Dataset is downloaded from: https://archive.ics.uci.edu/ml/datasets/iris
+
+All files are unzipped to `_data` directory.
+
 ## Technical features
 
 - Computational intensive
 - Efficient training and fitting
-- ~~Easily portable and expandable~~
+- Easily portable and expandable
 - Lightweight and friendly program interface
 
 ## TODO
@@ -13,16 +21,17 @@ A MLP implementation on multicore processors with Cuda. For final assignment of 
 - [x] CUDA or CPU parallel?
 - [x] API design
 - [x] Algebra calculation module
-- [ ] Data feeding module
+- [x] Data feeding module
 - [x] MLP training module
-- [ ] Unit test
+- [x] Unit test
 
 ## TODO (Depend on time)
 - [ ] Reinforcement learning application (e.g. DQN)
 - [ ] Optimize IO with coroutine in C++20.
 
-## Project structure
-
+## License
+This code is released under the Apache-2.0 License.
 ```text
-(To be determined)
+Copyright (C) 2020
+Xintao Hu <hxt.taoge@gmail.com>
 ```

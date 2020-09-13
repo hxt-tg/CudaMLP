@@ -1,5 +1,5 @@
-#ifndef CUDAMLP_CUDAMATRIX_CUH
-#define CUDAMLP_CUDAMATRIX_CUH
+#ifndef CUDAMLP_GPU_MATRIX_CUH
+#define CUDAMLP_GPU_MATRIX_CUH
 
 #include <iostream>
 #include <iomanip>
@@ -8,6 +8,8 @@
 #include <array>
 #include <cuda.h>
 #include <curand.h>
+#include "matrix.cuh"
+#include "cpu_matrix.cuh"
 
 #define BLOCK_SIZE  32
 
@@ -128,8 +130,8 @@ void scalar_interface(float *result, const float *a, const float b, unsigned row
 
 /* ======== Matrix multiplication kernels ======== */
 /*
- * Shape of a: row x mid
- * Shape of b: mid x col
+ * Shape of a: _row x mid
+ * Shape of b: mid x _col
  */
 __global__ void matmul_kernel(float *result, const float *a, const float *b,
                               unsigned row, unsigned mid, unsigned col) {
@@ -187,229 +189,232 @@ void initialize_interface(float *result, const float val, unsigned row, unsigned
     CudaCheck(cudaDeviceSynchronize());
 }
 
-class CUDAMatrix {
-    friend std::ostream &operator<<(std::ostream &out, const CUDAMatrix &m) {
-        out << "CUDAMatrix of " << m.row << " x " << m.col;
+class GPUMatrix : public BaseMatrix<GPUMatrix> {
+    friend std::ostream &operator<<(std::ostream &out, const GPUMatrix &m) {
+        out << "GPUMatrix of " << m._row << " x " << m._col;
         return out;
     }
 
-    static float *malloc_matrix(const unsigned &r, const unsigned &c) {
-        auto m = new float[r * c];
-        return m;
-    }
+    friend GPUMatrix sigmoid(const GPUMatrix &m);
 
 public:
-    CUDAMatrix() = default;
+    GPUMatrix() = default;
 
-    CUDAMatrix(const unsigned &r, const unsigned &c, const float &val = 0.0) : CUDAMatrix() {
+    GPUMatrix(const unsigned &r, const unsigned &c, const float &val = 0.0) : GPUMatrix() {
         if (!r || !c) return;
-        row = r;
-        col = c;
-        size = row * col * sizeof(float);
-        CudaCheck(cudaMalloc(&data, size));
-        initialize_interface(data, val, row, col);
+        _row = r;
+        _col = c;
+        _size = _row * _col * sizeof(float);
+        CudaCheck(cudaMalloc(&_data, _size));
+        initialize_interface(_data, val, _row, _col);
     }
 
-    CUDAMatrix(const CUDAMatrix &m) : CUDAMatrix(m.row, m.col) {
-        CudaCheck(cudaMemcpy(data, m.data, size, cudaMemcpyDeviceToDevice));
+    GPUMatrix(const GPUMatrix &m) : GPUMatrix(m._row, m._col) {
+        CudaCheck(cudaMemcpy(_data, m._data, _size, cudaMemcpyDeviceToDevice));
     }
 
-    explicit CUDAMatrix(const CPUMatrix &m) : CUDAMatrix() {
-        if (!m.row || !m.col) return;
-        row = m.row;
-        col = m.col;
-        size = row * col * sizeof(float);
-        CudaCheck(cudaMalloc(&data, size));
-        for (auto i = 0; i < row; i++)
-            CudaCheck(cudaMemcpy(data + i * col, m.data[i],
-                                 col * sizeof(float), cudaMemcpyHostToDevice));
+    explicit GPUMatrix(const CPUMatrix &m) : GPUMatrix() {
+        if (!m._row || !m._col) return;
+        _row = m._row;
+        _col = m._col;
+        _size = _row * _col * sizeof(float);
+        CudaCheck(cudaMalloc(&_data, _size));
+        CudaCheck(cudaMemcpy(_data, m._data, _size, cudaMemcpyHostToDevice));
     }
 
-    ~CUDAMatrix() {
+    ~GPUMatrix() {
         clear();
     }
 
     void clear() {
-        if (!size) return;
-        CudaCheck(cudaFree(data));
-        row = col = size = 0;
-        data = nullptr;
+        if (!_size) return;
+        CudaCheck(cudaFree(_data));
+        _row = _col = _size = 0;
+        _data = nullptr;
     }
 
     // Operators
-    CUDAMatrix &operator=(const CUDAMatrix &m) {
+    GPUMatrix &operator=(const GPUMatrix &m) {
         if (&m == this) return *this;
-        if (row && col)
+        if (_row && _col)
             clear();
 
-        row = m.row;
-        col = m.col;
-        size = m.size;
-        CudaCheck(cudaMalloc(&data, size));
-        CudaCheck(cudaMemcpy(data, m.data, size, cudaMemcpyDeviceToDevice));
+        _row = m._row;
+        _col = m._col;
+        _size = m._size;
+        CudaCheck(cudaMalloc(&_data, _size));
+        CudaCheck(cudaMemcpy(_data, m._data, _size, cudaMemcpyDeviceToDevice));
         return *this;
     }
 
-    CUDAMatrix &operator=(const std::initializer_list<std::initializer_list<float>> &arr) {
-        CUDAMatrix _m(arr);
-        return (*this = _m);
-    }
+//    GPUMatrix &operator=(const std::initializer_list<std::initializer_list<float>> &arr) {
+//        GPUMatrix _m(arr);
+//        return (*this = _m);
+//    }
 
-    CUDAMatrix operator+(const CUDAMatrix &m) const {
-        if (col != m.col || row != m.row)
+    GPUMatrix operator+(const GPUMatrix &m) const override {
+        if (_col != m._col || _row != m._row)
             throw std::runtime_error("Shape is not compatible.");
-        CUDAMatrix _m(row, col);
-        element_wise_interface(_m.data, data, m.data, row, col, KERNEL_ADD);
+        GPUMatrix _m(_row, _col);
+        element_wise_interface(_m._data, _data, m._data, _row, _col, KERNEL_ADD);
         return _m;
     }
 
-    CUDAMatrix operator-(const CUDAMatrix &m) const {
-        if (col != m.col || row != m.row)
+    GPUMatrix operator-(const GPUMatrix &m) const override {
+        if (_col != m._col || _row != m._row)
             throw std::runtime_error("Shape is not compatible.");
-        CUDAMatrix _m(row, col);
-        element_wise_interface(_m.data, data, m.data, row, col, KERNEL_SUB);
+        GPUMatrix _m(_row, _col);
+        element_wise_interface(_m._data, _data, m._data, _row, _col, KERNEL_SUB);
         return _m;
     }
 
-    CUDAMatrix operator*(const CUDAMatrix &m) const {
-        if (col != m.col || row != m.row)
+    GPUMatrix operator*(const GPUMatrix &m) const override {
+        if (_col != m._col || _row != m._row)
             throw std::runtime_error("Shape is not compatible.");
-        CUDAMatrix _m(row, col);
-        element_wise_interface(_m.data, data, m.data, row, col, KERNEL_MUL);
+        GPUMatrix _m(_row, _col);
+        element_wise_interface(_m._data, _data, m._data, _row, _col, KERNEL_MUL);
         return _m;
     }
 
-    CUDAMatrix operator/(const CUDAMatrix &m) const {
-        if (col != m.col || row != m.row)
+    GPUMatrix operator/(const GPUMatrix &m) const override {
+        if (_col != m._col || _row != m._row)
             throw std::runtime_error("Shape is not compatible.");
-        CUDAMatrix _m(row, col);
-        element_wise_interface(_m.data, data, m.data, row, col, KERNEL_DIV);
+        GPUMatrix _m(_row, _col);
+        element_wise_interface(_m._data, _data, m._data, _row, _col, KERNEL_DIV);
         return _m;
     }
 
-    CUDAMatrix operator+(const float &scalar) const {
-        CUDAMatrix _m(row, col);
-        scalar_interface(_m.data, data, scalar, row, col, KERNEL_ADD);
+    GPUMatrix operator+(const float &scalar) const override {
+        GPUMatrix _m(_row, _col);
+        scalar_interface(_m._data, _data, scalar, _row, _col, KERNEL_ADD);
         return _m;
     }
 
-    CUDAMatrix operator-(const float &scalar) const {
-        CUDAMatrix _m(row, col);
-        scalar_interface(_m.data, data, scalar, row, col, KERNEL_SUB);
+    GPUMatrix operator-(const float &scalar) const override {
+        GPUMatrix _m(_row, _col);
+        scalar_interface(_m._data, _data, scalar, _row, _col, KERNEL_SUB);
         return _m;
     }
 
-    CUDAMatrix operator*(const float &scalar) const {
-        CUDAMatrix _m(row, col);
-        scalar_interface(_m.data, data, scalar, row, col, KERNEL_MUL);
+    GPUMatrix operator*(const float &scalar) const override {
+        GPUMatrix _m(_row, _col);
+        scalar_interface(_m._data, _data, scalar, _row, _col, KERNEL_MUL);
         return _m;
     }
 
-    CUDAMatrix operator/(const float &scalar) const {
-        CUDAMatrix _m(row, col);
-        scalar_interface(_m.data, data, scalar, row, col, KERNEL_DIV);
+    GPUMatrix operator/(const float &scalar) const override {
+        GPUMatrix _m(_row, _col);
+        scalar_interface(_m._data, _data, scalar, _row, _col, KERNEL_DIV);
         return _m;
     }
 
-    CUDAMatrix operator%(const CUDAMatrix &m) const {
-        if (col != m.row)
-            throw std::runtime_error("Shape is not compatible. Column should equal to row.");
-        CUDAMatrix _m(row, m.col);
-        matmul_interface(_m.data, data, m.data, row, col, m.col);
+    GPUMatrix operator%(const GPUMatrix &m) const override {
+        if (_col != m._row)
+            throw std::runtime_error("Shape is not compatible. Column should equal to _row.");
+        GPUMatrix _m(_row, m._col);
+        matmul_interface(_m._data, _data, m._data, _row, _col, m._col);
         return _m;
     }
 
-    CUDAMatrix &operator+=(const CUDAMatrix &m) {
-        if (col != m.col || row != m.row)
+    GPUMatrix &operator+=(const GPUMatrix &m) override {
+        if (_col != m._col || _row != m._row)
             throw std::runtime_error("Shape is not compatible.");
-        element_wise_interface(data, data, m.data, row, col, KERNEL_ADD);
+        element_wise_interface(_data, _data, m._data, _row, _col, KERNEL_ADD);
         return (*this);
     }
 
-    CUDAMatrix &operator-=(const CUDAMatrix &m) {
-        if (col != m.col || row != m.row)
+    GPUMatrix &operator-=(const GPUMatrix &m) override {
+        if (_col != m._col || _row != m._row)
             throw std::runtime_error("Shape is not compatible.");
-        element_wise_interface(data, data, m.data, row, col, KERNEL_SUB);
+        element_wise_interface(_data, _data, m._data, _row, _col, KERNEL_SUB);
         return (*this);
     }
 
-    CUDAMatrix &operator*=(const CUDAMatrix &m) {
-        if (col != m.col || row != m.row)
+    GPUMatrix &operator*=(const GPUMatrix &m) override {
+        if (_col != m._col || _row != m._row)
             throw std::runtime_error("Shape is not compatible.");
-        element_wise_interface(data, data, m.data, row, col, KERNEL_MUL);
+        element_wise_interface(_data, _data, m._data, _row, _col, KERNEL_MUL);
         return (*this);
     }
 
-    CUDAMatrix &operator/=(const CUDAMatrix &m) {
-        if (col != m.col || row != m.row)
+    GPUMatrix &operator/=(const GPUMatrix &m) override {
+        if (_col != m._col || _row != m._row)
             throw std::runtime_error("Shape is not compatible.");
-        element_wise_interface(data, data, m.data, row, col, KERNEL_DIV);
+        element_wise_interface(_data, _data, m._data, _row, _col, KERNEL_DIV);
         return (*this);
     }
 
-    CUDAMatrix &operator+=(const float &scalar) {
-        scalar_interface(data, data, scalar, row, col, KERNEL_ADD);
+    GPUMatrix &operator+=(const float &scalar) override {
+        scalar_interface(_data, _data, scalar, _row, _col, KERNEL_ADD);
         return (*this);
     }
 
-    CUDAMatrix &operator-=(const float &scalar) {
-        scalar_interface(data, data, scalar, row, col, KERNEL_SUB);
+    GPUMatrix &operator-=(const float &scalar) override {
+        scalar_interface(_data, _data, scalar, _row, _col, KERNEL_SUB);
         return (*this);
     }
 
-    CUDAMatrix &operator*=(const float &scalar) {
-        scalar_interface(data, data, scalar, row, col, KERNEL_MUL);
+    GPUMatrix &operator*=(const float &scalar) override {
+        scalar_interface(_data, _data, scalar, _row, _col, KERNEL_MUL);
         return (*this);
     }
 
-    CUDAMatrix &operator/=(const float &scalar) {
-        scalar_interface(data, data, scalar, row, col, KERNEL_DIV);
+    GPUMatrix &operator/=(const float &scalar) override {
+        scalar_interface(_data, _data, scalar, _row, _col, KERNEL_DIV);
         return (*this);
     }
 
-    CUDAMatrix &operator%=(const CUDAMatrix &m) {
-        CUDAMatrix n = (*this) % m;
-        (*this) = n;
+    GPUMatrix &operator%=(const GPUMatrix &m) override {
+        GPUMatrix _m = (*this) % m;
+        (*this) = _m;
         return (*this);
     }
 
-    CUDAMatrix transpose() const {
-        unsigned new_row = col, new_col = row;
-        CUDAMatrix _m(new_row, new_col);
-        transpose_interface(_m.data, data, new_row, new_col);
+    GPUMatrix transpose() const override {
+        unsigned new_row = _col, new_col = _row;
+        GPUMatrix _m(new_row, new_col);
+        transpose_interface(_m._data, _data, new_row, new_col);
         return _m;
     }
 
-    float sum() const {
-        auto d = new float[size];
-        CudaCheck(cudaMemcpy(d, data, size, cudaMemcpyDeviceToHost));
+    float sum() const override {
+        auto d = new float[_size];
+        CudaCheck(cudaMemcpy(d, _data, _size, cudaMemcpyDeviceToHost));
 
         float s = 0;
-        for (auto i = 0; i < row * col; i++)
+        for (auto i = 0; i < _row * _col; i++)
             s += d[i];
         delete[] d;
         return s;
     }
 
-    void print_all_numbers(bool endl = true) const {
-        auto d = new float[size];
-        CudaCheck(cudaMemcpy(d, data, size, cudaMemcpyDeviceToHost));
+    unsigned row() const {
+        return _row;
+    }
 
-        for (auto i = 0; i < row; ++i) {
-            for (auto j = 0; j < col; ++j)
+    unsigned col() const {
+        return _col;
+    }
+
+    void print_all_numbers(bool endl = true) const {
+        auto d = new float[_size];
+        CudaCheck(cudaMemcpy(d, _data, _size, cudaMemcpyDeviceToHost));
+
+        for (auto i = 0; i < _row; ++i) {
+            for (auto j = 0; j < _col; ++j)
                 std::cout << std::fixed << std::setprecision(4) << std::setw(10)
-                          << d[i * col + j];
+                          << d[i * _col + j];
             std::cout << std::endl;
         }
         if (endl) std::cout << std::endl;
         delete[] d;
     }
 
-public:
-    unsigned row{0};
-    unsigned col{0};
-    size_t size{0};
-    float *data{nullptr};
+private:
+    unsigned _row{0};
+    unsigned _col{0};
+    size_t _size{0};
+    float *_data{nullptr};
 };
 
 
@@ -440,14 +445,14 @@ void sigmoid_interface(float *result, const float *a, unsigned row, unsigned col
     CudaCheck(cudaFree(d_result));
 }
 
-CUDAMatrix sigmoid(const CUDAMatrix &m) {
-    CUDAMatrix _m(m.row, m.col);
-    sigmoid_interface(_m.data, m.data, m.row, m.col);
+GPUMatrix sigmoid(const GPUMatrix &m) {
+    GPUMatrix _m(m._row, m._col);
+    sigmoid_interface(_m._data, m._data, m._row, m._col);
     return _m;
 }
 
-CUDAMatrix d_sigmoid(const CUDAMatrix &m) {
+GPUMatrix d_sigmoid(const GPUMatrix &m) {
     return m * (m * (-1) + 1);
 }
 
-#endif //CUDAMLP_CUDAMATRIX_CUH
+#endif //CUDAMLP_GPU_MATRIX_CUH
